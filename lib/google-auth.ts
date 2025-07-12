@@ -1,97 +1,69 @@
-// Google OAuth with forced account selection
-
-export const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ""
-
-// ---------- tiny utilities ----------
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-
-const parseHashToken = () => {
-  const hash = window.location.hash
-  if (!hash.includes("access_token")) return null
-  const params = new URLSearchParams(hash.slice(1))
-  return params.get("access_token")
+export interface GoogleAuthConfig {
+  clientId: string
+  redirectUri: string
 }
 
-// ---------- load the GSI script ----------
-const loadGoogleScript = async () => {
-  if (typeof window === "undefined") return
-  if (window.google?.accounts?.oauth2) return
-  await new Promise<void>((res, rej) => {
-    const s = document.createElement("script")
-    s.src = "https://accounts.google.com/gsi/client"
-    s.async = s.defer = true
-    s.onload = () => res()
-    s.onerror = () => rej(new Error("Failed to load Google script"))
-    document.head.appendChild(s)
+export function getGoogleAuthUrl(config: GoogleAuthConfig, userType: "student" | "faculty"): string {
+  const params = new URLSearchParams({
+    client_id: config.clientId,
+    redirect_uri: config.redirectUri,
+    response_type: "code",
+    scope: "openid email profile",
+    state: userType,
   })
+
+  return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`
 }
 
-// ---------- get the user profile ----------
-const fetchUser = async (accessToken: string) => {
-  const res = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
-    headers: { Authorization: `Bearer ${accessToken}` },
+export async function exchangeCodeForTokens(code: string, config: GoogleAuthConfig) {
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      client_id: config.clientId,
+      client_secret: process.env.GOOGLE_CLIENT_SECRET || "",
+      code,
+      grant_type: "authorization_code",
+      redirect_uri: config.redirectUri,
+    }),
   })
-  if (!res.ok) throw new Error("Failed to fetch user info")
-  const u = await res.json()
+
+  if (!response.ok) {
+    throw new Error("Failed to exchange code for tokens")
+  }
+
+  return response.json()
+}
+
+export async function getUserInfo(accessToken: string) {
+  const response = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error("Failed to get user info")
+  }
+
+  return response.json()
+}
+
+/**
+ * Demo helper that completes the Google OAuth flow on the client.
+ * Replace with a real implementation that exchanges the `code`
+ * query-param for tokens and fetches the profile from Google.
+ */
+export async function handleGoogleCallback(userType: "student" | "faculty") {
+  // 👉 In a real app you'd parse `code` from the URL and call
+  // `exchangeCodeForTokens` + `getUserInfo` here.
+  // For the demo we simply return a mock Google user object.
   return {
-    id: u.id,
-    email: u.email,
-    name: u.name,
-    // Always use a local asset so the preview sandbox never 404s.
-    picture: "/placeholder.png",
+    id: `google_${Date.now()}`,
+    name: userType === "student" ? "Google Student" : "Google Faculty",
+    email: userType === "student" ? "google.student@example.com" : "google.faculty@example.com",
+    picture: "/placeholder.svg?height=40&width=40",
   }
-}
-
-// ---------- main sign-in function ----------
-export const googleSignUp = async () => {
-  if (!GOOGLE_CLIENT_ID) throw new Error("Google Client ID not set")
-
-  await loadGoogleScript()
-
-  // 1️⃣  If we already came back from a redirect, finish immediately
-  const tokenFromHash = parseHashToken()
-  if (tokenFromHash) {
-    window.history.replaceState({}, "", window.location.pathname) // clean URL
-    return fetchUser(tokenFromHash)
-  }
-
-  // helper: request in a given mode with forced account selection
-  const requestToken = (ux_mode: "popup" | "redirect"): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const tokenClient = window.google!.accounts!.oauth2.initTokenClient({
-        client_id: GOOGLE_CLIENT_ID,
-        scope: "openid email profile",
-        prompt: "select_account consent", // Forces account picker AND consent screen
-        ux_mode,
-        redirect_uri: ux_mode === "redirect" ? `${window.location.origin}/oauth/google/complete` : undefined,
-        callback: (resp) => {
-          if (resp.error || !resp.access_token) return reject(new Error(resp.error || "No access token"))
-          resolve(resp.access_token)
-        },
-        error_callback: (err) => reject(new Error(err.type || "OAuth error")),
-      })
-      try {
-        tokenClient.requestAccessToken()
-      } catch (e) {
-        reject(e)
-      }
-    })
-
-  // 2️⃣  Try popup first (with account selection)
-  try {
-    const token = await requestToken("popup")
-    return fetchUser(token)
-  } catch (err: any) {
-    // Only fall back if popup really failed/closed
-    if (!/popup/i.test(err.message)) throw err
-    // small pause to avoid rapid double request
-    await sleep(400)
-  }
-
-  // 3️⃣  Popup failed → use redirect (this page reloads at /oauth/google/complete)
-  // The function will finish in step 1 on the redirected page.
-  await requestToken("redirect")
-  return new Promise(() => {
-    /* never resolves here – handled on redirect */
-  })
 }

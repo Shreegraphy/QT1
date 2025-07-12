@@ -1,473 +1,903 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useAuth } from "@/contexts/auth-context"
+import { useRouter } from "next/navigation"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   BookOpen,
-  Clock,
-  Trophy,
-  TrendingUp,
-  Play,
-  CheckCircle,
-  User,
-  Settings,
-  LogOut,
-  Bell,
-  Target,
-  Award,
   BarChart3,
+  Users,
+  Trophy,
+  Settings,
+  Home,
+  CheckCircle,
+  Clock,
+  Eye,
+  Star,
+  TrendingUp,
+  TrendingDown,
+  LogOut,
 } from "lucide-react"
-import { useRouter } from "next/navigation"
-import { useAuth } from "@/contexts/auth-context"
+
+// Chart.js imports
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+} from "chart.js"
+import { Line } from "react-chartjs-2"
+
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend)
+
+interface QuizData {
+  id: number
+  title: string
+  subject: string
+  duration: string
+  date: string
+  score: number | null
+  status: "completed" | "available" | "upcoming"
+  difficulty: "Easy" | "Medium" | "Hard"
+  attempts: number
+}
+
+interface StudentData {
+  name: string
+  section: string
+  score: number
+  rank: number
+  online: boolean
+  isCurrentUser?: boolean
+}
+
+// Helper functions for safe name handling
+const getDisplayName = (user: { name?: string; email?: string }) =>
+  user.name && user.name.trim().length > 0 ? user.name : (user.email?.split("@")[0] ?? "User")
+
+const getFirstName = (displayName: string) => displayName.split(" ")[0]
+
+const getInitials = (displayName: string) =>
+  displayName
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .toUpperCase()
 
 export default function StudentDashboard() {
-  const { user, logout: authLogout, isLoading: authLoading } = useAuth()
-  const [isLoading, setIsLoading] = useState(true)
-  const [stats, setStats] = useState<any>(null)
-  const [recentQuizzes, setRecentQuizzes] = useState<any[]>([])
+  const { user, logout, isLoading } = useAuth()
   const router = useRouter()
+  const [activeView, setActiveView] = useState("dashboard")
+  const [sortLevel, setSortLevel] = useState("College Level")
+  const [redirecting, setRedirecting] = useState(false)
 
-  // Load user data from auth context
   useEffect(() => {
-    if (authLoading) return
+    // Don't redirect while loading or if already redirecting
+    if (isLoading || redirecting) return
 
     if (!user) {
-      router.push("/")
+      setRedirecting(true)
+      router.push("/login")
       return
     }
 
     if (user.userType !== "student") {
+      setRedirecting(true)
       router.push("/faculty/dashboard")
       return
     }
+  }, [user, isLoading, router, redirecting])
 
-    // Load user-specific data
-    const userDataKey = `student_data_${user.id}`
-    const savedUserData = localStorage.getItem(userDataKey)
-
-    if (savedUserData) {
-      const parsedUserData = JSON.parse(savedUserData)
-      setStats(parsedUserData.stats)
-      setRecentQuizzes(parsedUserData.recentQuizzes)
-    }
-
-    // Load and update stats with real quiz results
-    updateStatsWithRealData()
-    setIsLoading(false)
-  }, [user, authLoading, router])
-
-  const updateStatsWithRealData = () => {
-    if (!user) return
-
-    // Get real quiz results for this student
-    const quizResults = JSON.parse(localStorage.getItem("quiz_results") || "[]")
-    const studentResults = quizResults.filter((result: any) => result.studentId === user.id)
-
-    if (studentResults.length > 0) {
-      // Calculate real stats from actual quiz results
-      const totalQuizzesTaken = studentResults.length
-      const averageScore = Math.round(
-        studentResults.reduce((sum: number, result: any) => sum + result.score, 0) / totalQuizzesTaken,
-      )
-      const totalPoints = studentResults.reduce((sum: number, result: any) => sum + result.score, 0)
-
-      // Update stats with real data while keeping generated data for other fields
-      const userDataKey = `student_data_${user.id}`
-      const savedUserData = localStorage.getItem(userDataKey)
-
-      if (savedUserData) {
-        const parsedUserData = JSON.parse(savedUserData)
-        const updatedStats = {
-          ...parsedUserData.stats,
-          completedQuizzes: totalQuizzesTaken,
-          averageScore: averageScore,
-          totalPoints: totalPoints,
-        }
-
-        // Add real quiz results to recent quizzes
-        const realRecentQuizzes = studentResults.slice(-4).map((result: any, index: number) => ({
-          id: `real_${index}`,
-          title: result.quizTitle,
-          subject: result.quizCode,
-          score: result.score,
-          status: "completed",
-          date: new Date(result.submittedAt).toISOString().split("T")[0],
-          duration: `${Math.floor(result.timeSpent / 60)} min`,
-        }))
-
-        // Combine real quizzes with generated ones
-        const combinedQuizzes = [
-          ...realRecentQuizzes,
-          ...parsedUserData.recentQuizzes.slice(0, 4 - realRecentQuizzes.length),
-        ]
-
-        const updatedData = {
-          stats: updatedStats,
-          recentQuizzes: combinedQuizzes,
-        }
-
-        localStorage.setItem(userDataKey, JSON.stringify(updatedData))
-        setStats(updatedStats)
-        setRecentQuizzes(combinedQuizzes)
-      }
-    }
+  // Sample data
+  const stats = {
+    totalQuizzes: 18,
+    completed: 11,
+    averageScore: 76,
+    classRank: 13,
   }
 
-  const handleLogout = () => {
-    authLogout()
+  const recentQuizzes: QuizData[] = [
+    {
+      id: 1,
+      title: "Physics - Newton's Laws",
+      subject: "Physics",
+      duration: "29 min",
+      date: "2025-07-09",
+      score: 69,
+      status: "completed",
+      difficulty: "Medium",
+      attempts: 1,
+    },
+    {
+      id: 2,
+      title: "Chemistry - Atomic Structure",
+      subject: "Chemistry",
+      duration: "35 min",
+      date: "2025-07-08",
+      score: 82,
+      status: "completed",
+      difficulty: "Hard",
+      attempts: 2,
+    },
+    {
+      id: 3,
+      title: "Mathematics - Calculus",
+      subject: "Mathematics",
+      duration: "42 min",
+      date: "2025-07-07",
+      score: 75,
+      status: "completed",
+      difficulty: "Medium",
+      attempts: 1,
+    },
+    {
+      id: 4,
+      title: "Biology - Cell Structure",
+      subject: "Biology",
+      duration: "30 min",
+      date: "2025-07-10",
+      score: null,
+      status: "available",
+      difficulty: "Easy",
+      attempts: 0,
+    },
+    {
+      id: 5,
+      title: "English - Literature Analysis",
+      subject: "English",
+      duration: "45 min",
+      date: "2025-07-11",
+      score: null,
+      status: "upcoming",
+      difficulty: "Hard",
+      attempts: 0,
+    },
+  ]
+
+  const classmates: StudentData[] = [
+    { name: "Alice Johnson", section: "Section A", score: 89, rank: 3, online: true },
+    { name: "Bob Smith", section: "Section A", score: 85, rank: 7, online: false },
+    { name: "Google User", section: "Section A", score: 76, rank: 13, online: true, isCurrentUser: true },
+    { name: "Carol Davis", section: "Section A", score: 92, rank: 1, online: true },
+    { name: "David Wilson", section: "Section A", score: 78, rank: 11, online: true },
+    { name: "Emma Brown", section: "Section B", score: 88, rank: 5, online: false },
+    { name: "Frank Miller", section: "Section B", score: 81, rank: 9, online: true },
+    { name: "Grace Lee", section: "Section B", score: 94, rank: 2, online: true },
+  ]
+
+  const leaderboard = [
+    {
+      name: "Carol Davis",
+      department: "Computer Science",
+      section: "Section A",
+      score: 92,
+      quizzes: 15,
+      average: 91.2,
+      rank: 1,
+    },
+    {
+      name: "Grace Lee",
+      department: "Computer Science",
+      section: "Section B",
+      score: 94,
+      quizzes: 12,
+      average: 89.8,
+      rank: 2,
+    },
+    {
+      name: "Alice Johnson",
+      department: "Computer Science",
+      section: "Section A",
+      score: 89,
+      quizzes: 14,
+      average: 87.5,
+      rank: 3,
+    },
+    {
+      name: "Tom Anderson",
+      department: "Computer Science",
+      section: "Section A",
+      score: 87,
+      quizzes: 13,
+      average: 86.1,
+      rank: 4,
+    },
+    {
+      name: "Emma Brown",
+      department: "Computer Science",
+      section: "Section B",
+      score: 88,
+      quizzes: 11,
+      average: 85.3,
+      rank: 5,
+    },
+    {
+      name: "Mike Johnson",
+      department: "Computer Science",
+      section: "Section A",
+      score: 86,
+      quizzes: 12,
+      average: 84.7,
+      rank: 6,
+    },
+    {
+      name: "Bob Smith",
+      department: "Computer Science",
+      section: "Section A",
+      score: 85,
+      quizzes: 13,
+      average: 83.9,
+      rank: 7,
+    },
+    {
+      name: "Sarah Wilson",
+      department: "Computer Science",
+      section: "Section B",
+      score: 84,
+      quizzes: 10,
+      average: 83.2,
+      rank: 8,
+    },
+    {
+      name: "Frank Miller",
+      department: "Computer Science",
+      section: "Section B",
+      score: 81,
+      quizzes: 11,
+      average: 82.1,
+      rank: 9,
+    },
+    {
+      name: "Lisa Chen",
+      department: "Computer Science",
+      section: "Section A",
+      score: 80,
+      quizzes: 9,
+      average: 81.5,
+      rank: 10,
+    },
+    {
+      name: "David Wilson",
+      department: "Computer Science",
+      section: "Section A",
+      score: 78,
+      quizzes: 12,
+      average: 80.3,
+      rank: 11,
+    },
+    {
+      name: "Amy Taylor",
+      department: "Computer Science",
+      section: "Section B",
+      score: 77,
+      quizzes: 8,
+      average: 79.8,
+      rank: 12,
+    },
+    {
+      name: "Google User",
+      department: "Computer Science",
+      section: "Section A",
+      score: 76,
+      quizzes: 11,
+      average: 78.9,
+      rank: 13,
+    },
+  ]
+
+  const subjectPerformance = [
+    { subject: "Physics", score: 76 },
+    { subject: "Mathematics", score: 82 },
+    { subject: "Chemistry", score: 69 },
+    { subject: "Biology", score: 91 },
+  ]
+
+  // Chart data
+  const chartData = {
+    labels: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul"],
+    datasets: [
+      {
+        label: "Performance Trend",
+        data: [65, 72, 68, 75, 78, 76, 82],
+        borderColor: "#3b82f6",
+        backgroundColor: "rgba(59, 130, 246, 0.1)",
+        tension: 0.4,
+      },
+    ],
   }
 
-  // Generate user initials for avatar fallback
-  const getUserInitials = (name: string) => {
-    return name
-      .split(" ")
-      .map((n) => n[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 2)
+  const chartOptions = {
+    responsive: true,
+    plugins: {
+      legend: {
+        position: "top" as const,
+      },
+      title: {
+        display: true,
+        text: "Performance Over Time",
+      },
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        max: 100,
+      },
+    },
   }
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "completed":
-        return "bg-green-100 text-green-800"
-      case "available":
-        return "bg-blue-100 text-blue-800"
-      case "overdue":
-        return "bg-red-100 text-red-800"
-      default:
-        return "bg-gray-100 text-gray-800"
-    }
-  }
-
-  const getScoreColor = (score: number) => {
-    if (score >= 90) return "text-green-600"
-    if (score >= 80) return "text-blue-600"
-    if (score >= 70) return "text-yellow-600"
-    return "text-red-600"
-  }
-
-  // Show loading state while checking authentication
-  if (isLoading || !stats) {
+  // Show loading while authenticating or redirecting
+  if (isLoading || redirecting || !user) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading your dashboard...</p>
-        </div>
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
       </div>
     )
   }
 
-  // Don't render if no user (will redirect)
-  if (!user) {
+  // Don't render if user type doesn't match
+  if (user.userType !== "student") {
     return null
   }
 
-  return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center">
-              <div className="flex items-center">
-                <BookOpen className="h-8 w-8 text-blue-600" />
-                <span className="ml-2 text-xl font-bold text-gray-900">QuizMaster</span>
+  const displayName = getDisplayName(user)
+  const firstName = getFirstName(displayName)
+  const initials = getInitials(displayName)
+
+  const sidebarItems = [
+    { key: "dashboard", label: "Dashboard", icon: Home },
+    { key: "analytics", label: "Analytics", icon: BarChart3 },
+    { key: "quizzes", label: "Quizzes", icon: BookOpen },
+    { key: "classmates", label: "Classmates", icon: Users },
+    { key: "leaderboard", label: "Leaderboard", icon: Trophy },
+    { key: "settings", label: "Settings", icon: Settings },
+  ]
+
+  const renderDashboard = () => (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+        <p className="text-gray-600">Welcome back to your learning hub</p>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Total Quizzes</p>
+                <p className="text-2xl font-bold">{stats.totalQuizzes}</p>
+                <div className="flex items-center text-sm text-green-600">
+                  <TrendingUp className="w-4 h-4 mr-1" />
+                  +5.4%
+                </div>
               </div>
-              <Badge variant="secondary" className="ml-4">
-                Student Portal
-              </Badge>
+              <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+                <BookOpen className="w-6 h-6 text-green-600" />
+              </div>
             </div>
+          </CardContent>
+        </Card>
 
-            <div className="flex items-center space-x-4">
-              <Button variant="ghost" size="sm">
-                <Bell className="h-4 w-4" />
-              </Button>
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Completed</p>
+                <p className="text-2xl font-bold">{stats.completed}</p>
+                <div className="flex items-center text-sm text-green-600">
+                  <TrendingUp className="w-4 h-4 mr-1" />
+                  +8.0%
+                </div>
+              </div>
+              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                <CheckCircle className="w-6 h-6 text-blue-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-                    <Avatar className="h-8 w-8">
-                      <AvatarImage src={user.picture || "/placeholder.png"} alt={user.name} />
-                      <AvatarFallback>{getUserInitials(user.name)}</AvatarFallback>
-                    </Avatar>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent className="w-56" align="end" forceMount>
-                  <DropdownMenuLabel className="font-normal">
-                    <div className="flex flex-col space-y-1">
-                      <p className="text-sm font-medium leading-none">{user.name}</p>
-                      <p className="text-xs leading-none text-muted-foreground">{user.email}</p>
-                      <p className="text-xs leading-none text-muted-foreground">
-                        Signed in via {user.loginMethod === "google" ? "Google" : user.loginMethod}
-                      </p>
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Average Score</p>
+                <p className="text-2xl font-bold">{stats.averageScore}%</p>
+                <div className="flex items-center text-sm text-red-600">
+                  <TrendingDown className="w-4 h-4 mr-1" />
+                  -4.5%
+                </div>
+              </div>
+              <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                <BarChart3 className="w-6 h-6 text-purple-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-600">Class Rank</p>
+                <p className="text-2xl font-bold">#{stats.classRank}</p>
+                <div className="flex items-center text-sm text-red-600">
+                  <TrendingDown className="w-4 h-4 mr-1" />
+                  -6.5%
+                </div>
+              </div>
+              <div className="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center">
+                <Trophy className="w-6 h-6 text-yellow-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Recent Quizzes Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent Quizzes</CardTitle>
+          <CardDescription>Your latest quiz activities</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-left py-3 px-4 font-medium text-gray-600">Quiz</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-600">Subject</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-600">Duration</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-600">Date</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-600">Score</th>
+                  <th className="text-left py-3 px-4 font-medium text-gray-600">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentQuizzes.slice(0, 3).map((quiz) => (
+                  <tr key={quiz.id} className="border-b hover:bg-gray-50">
+                    <td className="py-3 px-4 font-medium">{quiz.title}</td>
+                    <td className="py-3 px-4">{quiz.subject}</td>
+                    <td className="py-3 px-4">
+                      <div className="flex items-center">
+                        <Clock className="w-4 h-4 mr-1 text-gray-400" />
+                        {quiz.duration}
+                      </div>
+                    </td>
+                    <td className="py-3 px-4">{quiz.date}</td>
+                    <td className="py-3 px-4">
+                      {quiz.score ? (
+                        <span className="font-semibold">{quiz.score}%</span>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4">
+                      <Badge
+                        variant={quiz.status === "completed" ? "default" : "secondary"}
+                        className={
+                          quiz.status === "completed" ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"
+                        }
+                      >
+                        {quiz.status === "completed" ? "Completed" : "Available"}
+                      </Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+
+  const renderAnalytics = () => (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Analytics</h1>
+        <p className="text-gray-600">Detailed performance insights</p>
+      </div>
+
+      {/* Sort Buttons */}
+      <div className="flex gap-2">
+        {["College Level", "Department Level", "Section Level"].map((level) => (
+          <Button
+            key={level}
+            variant={sortLevel === level ? "default" : "outline"}
+            onClick={() => setSortLevel(level)}
+            className={sortLevel === level ? "bg-blue-600" : ""}
+          >
+            {level}
+          </Button>
+        ))}
+      </div>
+
+      {/* Performance Chart */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Performance Trend</CardTitle>
+          <CardDescription>Your quiz performance over time</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="h-80">
+            <Line data={chartData} options={chartOptions} />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Subject Performance */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Subject Performance</CardTitle>
+          <CardDescription>Your performance across different subjects</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {subjectPerformance.map((subject) => (
+              <div key={subject.subject} className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="font-medium">{subject.subject}</span>
+                  <span className="font-semibold">{subject.score}%</span>
+                </div>
+                <Progress value={subject.score} className="h-2" />
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+
+  const renderQuizzes = () => (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Quizzes</h1>
+        <p className="text-gray-600">All your quiz activities</p>
+      </div>
+
+      <div className="grid gap-4">
+        {recentQuizzes.map((quiz) => (
+          <Card key={quiz.id} className="hover:shadow-md transition-shadow">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-2">
+                    <h3 className="font-semibold text-lg">{quiz.title}</h3>
+                    <Badge
+                      variant="outline"
+                      className={
+                        quiz.difficulty === "Easy"
+                          ? "border-green-200 text-green-700"
+                          : quiz.difficulty === "Medium"
+                            ? "border-yellow-200 text-yellow-700"
+                            : "border-red-200 text-red-700"
+                      }
+                    >
+                      {quiz.difficulty}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center gap-4 text-sm text-gray-600">
+                    <span>{quiz.subject}</span>
+                    <div className="flex items-center">
+                      <Clock className="w-4 h-4 mr-1" />
+                      {quiz.duration}
                     </div>
-                  </DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem>
-                    <User className="mr-2 h-4 w-4" />
-                    <span>Profile</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem>
-                    <Settings className="mr-2 h-4 w-4" />
-                    <span>Settings</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={handleLogout}>
-                    <LogOut className="mr-2 h-4 w-4" />
-                    <span>Log out</span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                    <span>{quiz.date}</span>
+                    <span>{quiz.attempts} attempts</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="text-right">
+                    <Badge
+                      variant={quiz.status === "completed" ? "default" : "secondary"}
+                      className={
+                        quiz.status === "completed"
+                          ? "bg-green-100 text-green-800"
+                          : quiz.status === "available"
+                            ? "bg-blue-100 text-blue-800"
+                            : "bg-gray-100 text-gray-800"
+                      }
+                    >
+                      {quiz.status}
+                    </Badge>
+                    {quiz.score && <div className="text-lg font-bold mt-1">{quiz.score}%</div>}
+                  </div>
+                  <Button variant="outline" size="sm">
+                    <Eye className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </div>
+  )
+
+  const renderClassmates = () => (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Classmates</h1>
+        <p className="text-gray-600">Connect with your section peers</p>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Section Classmates</CardTitle>
+          <CardDescription>Computer Science - Section A & B</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3">
+            {classmates.map((student, index) => (
+              <div
+                key={index}
+                className={`flex items-center justify-between p-4 rounded-lg ${
+                  student.isCurrentUser ? "bg-blue-50 border border-blue-200" : "bg-gray-50"
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <Avatar className="w-10 h-10">
+                      <AvatarFallback className="bg-blue-100 text-blue-600">
+                        {student.name
+                          .split(" ")
+                          .map((n) => n[0])
+                          .join("")}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div
+                      className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-white ${
+                        student.online ? "bg-green-500" : "bg-gray-400"
+                      }`}
+                    />
+                  </div>
+                  <div>
+                    <div className="font-medium">
+                      {student.name}
+                      {student.isCurrentUser && <span className="text-blue-600 ml-1">(You)</span>}
+                    </div>
+                    <div className="text-sm text-gray-600">{student.section}</div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="font-semibold">{student.score}%</div>
+                  <div className="text-sm text-gray-600">Rank #{student.rank}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+
+  const renderLeaderboard = () => (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Leaderboard</h1>
+          <p className="text-gray-600">See how you rank against peers</p>
+        </div>
+        <div className="flex items-center gap-2 text-sm text-gray-600">
+          <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+          Live • Updates every 30 seconds
+        </div>
+      </div>
+
+      {/* Sort Buttons */}
+      <div className="flex gap-2">
+        {["College Level", "Department Level", "Section Level"].map((level) => (
+          <Button
+            key={level}
+            variant={sortLevel === level ? "default" : "outline"}
+            onClick={() => setSortLevel(level)}
+            className={sortLevel === level ? "bg-blue-600" : ""}
+          >
+            {level}
+          </Button>
+        ))}
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Rankings</CardTitle>
+          <CardDescription>Current standings based on quiz performance</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3">
+            {leaderboard.map((student) => (
+              <div
+                key={student.rank}
+                className={`flex items-center justify-between p-4 rounded-lg ${
+                  student.name === "Google User" ? "bg-blue-50 border-l-4 border-blue-500" : "bg-gray-50"
+                }`}
+              >
+                <div className="flex items-center gap-4">
+                  <div
+                    className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
+                      student.rank <= 3 ? "bg-yellow-500 text-white" : "bg-gray-200 text-gray-700"
+                    }`}
+                  >
+                    {student.rank <= 3 ? <Trophy className="w-4 h-4" /> : student.rank}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{student.name}</span>
+                      {student.rank <= 3 && <Star className="w-4 h-4 text-yellow-500" />}
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      {student.department} • {student.section}
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="font-bold text-lg">{student.score}%</div>
+                  <div className="text-sm text-gray-600">
+                    {student.quizzes} quizzes • {student.average}% avg
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+
+  const renderSettings = () => (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
+        <p className="text-gray-600">Manage your account preferences</p>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Profile Settings</CardTitle>
+          <CardDescription>Update your personal information</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-4">
+            <Avatar className="w-16 h-16">
+              <AvatarFallback className="bg-blue-100 text-blue-600 text-xl">{initials}</AvatarFallback>
+            </Avatar>
+            <div>
+              <h3 className="font-semibold">{displayName}</h3>
+              <p className="text-gray-600">{user.email}</p>
+              <Badge variant="secondary">Student</Badge>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm font-medium">Name</label>
+              <Input value={displayName} className="mt-1" />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Email</label>
+              <Input value={user.email} className="mt-1" />
+            </div>
+          </div>
+
+          <Button>Save Changes</Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Notifications</CardTitle>
+          <CardDescription>Choose what notifications you want to receive</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center space-x-2">
+            <Checkbox id="quiz-reminders" />
+            <label htmlFor="quiz-reminders" className="text-sm font-medium">
+              Quiz reminders
+            </label>
+          </div>
+          <div className="flex items-center space-x-2">
+            <Checkbox id="score-updates" />
+            <label htmlFor="score-updates" className="text-sm font-medium">
+              Score updates
+            </label>
+          </div>
+          <div className="flex items-center space-x-2">
+            <Checkbox id="leaderboard-changes" />
+            <label htmlFor="leaderboard-changes" className="text-sm font-medium">
+              Leaderboard changes
+            </label>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+
+  const renderContent = () => {
+    switch (activeView) {
+      case "analytics":
+        return renderAnalytics()
+      case "quizzes":
+        return renderQuizzes()
+      case "classmates":
+        return renderClassmates()
+      case "leaderboard":
+        return renderLeaderboard()
+      case "settings":
+        return renderSettings()
+      default:
+        return renderDashboard()
+    }
+  }
+
+  return (
+    <div className="flex min-h-screen bg-gray-50">
+      {/* Sidebar */}
+      <div className="w-64 bg-white border-r border-gray-200 flex flex-col">
+        {/* Logo */}
+        <div className="p-6 border-b border-gray-200">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
+              <BookOpen className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h2 className="font-bold text-gray-900">Quiz Portal</h2>
+              <p className="text-sm text-gray-600">Student Panel</p>
             </div>
           </div>
         </div>
-      </header>
+
+        {/* Navigation */}
+        <nav className="flex-1 p-4">
+          <div className="space-y-1">
+            {sidebarItems.map((item) => (
+              <button
+                key={item.key}
+                onClick={() => setActiveView(item.key)}
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${
+                  activeView === item.key ? "bg-gray-100 text-blue-600" : "text-gray-700 hover:bg-gray-50"
+                }`}
+              >
+                <item.icon className="w-5 h-5" />
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </nav>
+
+        {/* User Section */}
+        <div className="p-4 border-t border-gray-200">
+          <div className="flex items-center gap-3 mb-3">
+            <Avatar className="w-10 h-10">
+              <AvatarFallback className="bg-blue-100 text-blue-600">{initials}</AvatarFallback>
+            </Avatar>
+            <div className="flex-1">
+              <p className="font-medium text-gray-900">{displayName}</p>
+              <p className="text-sm text-gray-600">student</p>
+            </div>
+          </div>
+          <Button variant="outline" size="sm" onClick={logout} className="w-full justify-start bg-transparent">
+            <LogOut className="w-4 h-4 mr-2" />
+            Logout
+          </Button>
+        </div>
+      </div>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Welcome Section */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Welcome back, {user.name}!</h1>
-          <p className="text-gray-600 mt-2">Ready to continue your learning journey?</p>
-          <div className="mt-4 flex items-center space-x-4 text-sm text-gray-500">
-            <span>Account created: {new Date(user.signupTime || user.loginTime).toLocaleDateString()}</span>
-            <span>•</span>
-            <span>Login method: {user.loginMethod}</span>
-            <span>•</span>
-            <span>Student ID: {user.id.slice(-8).toUpperCase()}</span>
-          </div>
-        </div>
-
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <BookOpen className="h-8 w-8 text-blue-600" />
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Total Quizzes</p>
-                  <p className="text-2xl font-bold text-gray-900">{stats.totalQuizzes}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <CheckCircle className="h-8 w-8 text-green-600" />
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Completed</p>
-                  <p className="text-2xl font-bold text-gray-900">{stats.completedQuizzes}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <BarChart3 className="h-8 w-8 text-purple-600" />
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Average Score</p>
-                  <p className="text-2xl font-bold text-gray-900">{stats.averageScore}%</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <Trophy className="h-8 w-8 text-yellow-600" />
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Class Rank</p>
-                  <p className="text-2xl font-bold text-gray-900">#{stats.rank}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <Award className="h-8 w-8 text-orange-600" />
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Total Points</p>
-                  <p className="text-2xl font-bold text-gray-900">{stats.totalPoints}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Recent Quizzes */}
-          <div className="lg:col-span-2">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Clock className="mr-2 h-5 w-5" />
-                  Your Recent Quizzes
-                </CardTitle>
-                <CardDescription>Your latest quiz activities and scores</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {recentQuizzes.map((quiz) => (
-                    <div key={quiz.id} className="flex items-center justify-between p-4 border rounded-lg">
-                      <div className="flex-1">
-                        <h3 className="font-medium text-gray-900">{quiz.title}</h3>
-                        <p className="text-sm text-gray-600">
-                          {quiz.subject} • {quiz.duration}
-                        </p>
-                        <p className="text-xs text-gray-500">{quiz.date}</p>
-                      </div>
-                      <div className="flex items-center space-x-3">
-                        <Badge className={getStatusColor(quiz.status)}>
-                          {quiz.status === "completed" ? "Completed" : "Available"}
-                        </Badge>
-                        {quiz.score && <span className={`font-bold ${getScoreColor(quiz.score)}`}>{quiz.score}%</span>}
-                        {quiz.status === "available" && (
-                          <Button size="sm">
-                            <Play className="mr-1 h-3 w-3" />
-                            Start
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Sidebar */}
-          <div className="space-y-6">
-            {/* User Profile Card */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <User className="mr-2 h-5 w-5" />
-                  Your Profile
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center space-x-3">
-                  <Avatar className="h-12 w-12">
-                    <AvatarImage src={user.picture || "/placeholder.png"} alt={user.name} />
-                    <AvatarFallback>{getUserInitials(user.name)}</AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <p className="font-medium text-gray-900">{user.name}</p>
-                    <p className="text-sm text-gray-600">{user.email}</p>
-                    <p className="text-xs text-gray-500">Student Account</p>
-                  </div>
-                </div>
-                <div className="pt-2 border-t">
-                  <div className="grid grid-cols-2 gap-4 text-center">
-                    <div>
-                      <p className="text-lg font-bold text-blue-600">{stats.completedQuizzes}</p>
-                      <p className="text-xs text-gray-500">Completed</p>
-                    </div>
-                    <div>
-                      <p className="text-lg font-bold text-green-600">{stats.averageScore}%</p>
-                      <p className="text-xs text-gray-500">Avg Score</p>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Progress Card */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Target className="mr-2 h-5 w-5" />
-                  Your Progress
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <div className="flex justify-between text-sm mb-2">
-                    <span>Quiz Completion</span>
-                    <span>{Math.round((stats.completedQuizzes / stats.totalQuizzes) * 100)}%</span>
-                  </div>
-                  <Progress value={(stats.completedQuizzes / stats.totalQuizzes) * 100} />
-                </div>
-                <div>
-                  <div className="flex justify-between text-sm mb-2">
-                    <span>Performance Level</span>
-                    <span>{stats.averageScore}%</span>
-                  </div>
-                  <Progress value={stats.averageScore} />
-                </div>
-                <div className="pt-2 text-center">
-                  <p className="text-sm text-gray-600">
-                    You're ranked <span className="font-bold text-blue-600">#{stats.rank}</span> in your class!
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Attend Quiz */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Play className="mr-2 h-5 w-5" />
-                  Join Quiz Session
-                </CardTitle>
-                <CardDescription>Enter the referral code provided by your teacher</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Button
-                  className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
-                  onClick={() => router.push("/quiz/join")}
-                >
-                  <Play className="mr-2 h-4 w-4" />
-                  Attend Quiz
-                </Button>
-                <p className="text-xs text-gray-500 mt-2 text-center">Get the quiz code from your teacher to join</p>
-              </CardContent>
-            </Card>
-
-            {/* Quick Actions */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Quick Actions</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <Button className="w-full justify-start bg-transparent" variant="outline">
-                  <BookOpen className="mr-2 h-4 w-4" />
-                  Browse All Quizzes
-                </Button>
-                <Button className="w-full justify-start bg-transparent" variant="outline">
-                  <TrendingUp className="mr-2 h-4 w-4" />
-                  View Performance
-                </Button>
-                <Button className="w-full justify-start bg-transparent" variant="outline">
-                  <Trophy className="mr-2 h-4 w-4" />
-                  Leaderboard
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </main>
+      <div className="flex-1 overflow-auto">
+        <div className="p-8">{renderContent()}</div>
+      </div>
     </div>
   )
 }

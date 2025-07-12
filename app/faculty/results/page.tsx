@@ -1,94 +1,77 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   BookOpen,
-  ArrowLeft,
   Users,
-  Trophy,
-  BarChart3,
-  Download,
-  Search,
-  Filter,
   TrendingUp,
-  Target,
-  Award,
+  Download,
+  Filter,
+  Search,
+  BarChart3,
+  Clock,
+  CheckCircle,
+  AlertCircle,
 } from "lucide-react"
+import { useRouter } from "next/navigation"
 import { useAuth } from "@/contexts/auth-context"
 
-export default function FacultyResultsPage() {
+interface QuizResult {
+  id: string
+  studentName: string
+  studentEmail: string
+  studentId: string
+  quizTitle: string
+  quizCode: string
+  score: number
+  timeSpent: number
+  submittedAt: string
+  status: "completed" | "in-progress" | "not-started"
+}
+
+export default function FacultyResults() {
   const { user, isLoading: authLoading } = useAuth()
-  const [isLoading, setIsLoading] = useState(true)
-  const [results, setResults] = useState<any[]>([])
-  const [filteredResults, setFilteredResults] = useState<any[]>([])
-  const [selectedSection, setSelectedSection] = useState("all")
-  const [selectedDepartment, setSelectedDepartment] = useState("all")
-  const [selectedQuiz, setSelectedQuiz] = useState("all")
-  const [searchTerm, setSearchTerm] = useState("")
   const router = useRouter()
+  const [results, setResults] = useState<QuizResult[]>([])
+  const [filteredResults, setFilteredResults] = useState<QuizResult[]>([])
+  const [selectedQuiz, setSelectedQuiz] = useState<string>("all")
+  const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    if (authLoading) return
-
-    if (!user) {
-      router.push("/")
+    if (!authLoading && (!user || user.userType !== "faculty")) {
+      router.push("/login")
       return
     }
 
-    if (user.userType !== "faculty") {
-      router.push("/student/dashboard")
-      return
+    if (user) {
+      loadResults()
     }
-
-    // Load quiz results
-    const quizResults = JSON.parse(localStorage.getItem("quiz_results") || "[]")
-    setResults(quizResults)
-    setFilteredResults(quizResults)
-    setIsLoading(false)
   }, [user, authLoading, router])
 
-  // Filter results based on selected criteria
-  useEffect(() => {
-    let filtered = results
-
-    if (selectedSection !== "all") {
-      filtered = filtered.filter((result) => result.section === selectedSection)
+  const loadResults = () => {
+    // Load quiz results from localStorage
+    const savedResults = localStorage.getItem("quiz_results")
+    if (savedResults) {
+      const parsedResults = JSON.parse(savedResults)
+      setResults(parsedResults)
+      setFilteredResults(parsedResults)
     }
+    setIsLoading(false)
+  }
 
-    if (selectedDepartment !== "all") {
-      filtered = filtered.filter((result) => result.department === selectedDepartment)
+  const handleQuizFilter = (quizCode: string) => {
+    setSelectedQuiz(quizCode)
+    if (quizCode === "all") {
+      setFilteredResults(results)
+    } else {
+      setFilteredResults(results.filter((result) => result.quizCode === quizCode))
     }
-
-    if (selectedQuiz !== "all") {
-      filtered = filtered.filter((result) => result.quizCode === selectedQuiz)
-    }
-
-    if (searchTerm) {
-      filtered = filtered.filter(
-        (result) =>
-          result.studentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          result.studentEmail.toLowerCase().includes(searchTerm.toLowerCase()),
-      )
-    }
-
-    setFilteredResults(filtered)
-  }, [results, selectedSection, selectedDepartment, selectedQuiz, searchTerm])
-
-  const getUserInitials = (name: string) => {
-    return name
-      .split(" ")
-      .map((n) => n[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 2)
   }
 
   const getScoreColor = (score: number) => {
@@ -98,105 +81,53 @@ export default function FacultyResultsPage() {
     return "text-red-600"
   }
 
-  const getScoreBadgeColor = (score: number) => {
-    if (score >= 90) return "bg-green-100 text-green-800"
-    if (score >= 80) return "bg-blue-100 text-blue-800"
-    if (score >= 70) return "bg-yellow-100 text-yellow-800"
-    return "bg-red-100 text-red-800"
+  const getScoreBadgeVariant = (score: number) => {
+    if (score >= 90) return "default"
+    if (score >= 70) return "secondary"
+    return "destructive"
   }
 
-  // Calculate statistics
   const calculateStats = () => {
     if (filteredResults.length === 0) {
       return {
-        totalStudents: 0,
+        totalSubmissions: 0,
         averageScore: 0,
-        highestScore: 0,
-        lowestScore: 0,
-        passRate: 0,
+        completionRate: 0,
+        topScore: 0,
       }
     }
 
-    const scores = filteredResults.map((result) => result.score)
-    const totalStudents = filteredResults.length
-    const averageScore = Math.round(scores.reduce((sum, score) => sum + score, 0) / totalStudents)
-    const highestScore = Math.max(...scores)
-    const lowestScore = Math.min(...scores)
-    const passRate = Math.round((scores.filter((score) => score >= 60).length / totalStudents) * 100)
+    const completedResults = filteredResults.filter((r) => r.status === "completed")
+    const totalSubmissions = completedResults.length
+    const averageScore = Math.round(
+      completedResults.reduce((sum, result) => sum + result.score, 0) / totalSubmissions || 0,
+    )
+    const completionRate = Math.round((totalSubmissions / filteredResults.length) * 100)
+    const topScore = Math.max(...completedResults.map((r) => r.score), 0)
 
     return {
-      totalStudents,
+      totalSubmissions,
       averageScore,
-      highestScore,
-      lowestScore,
-      passRate,
+      completionRate,
+      topScore,
     }
   }
 
   const stats = calculateStats()
+  const uniqueQuizzes = Array.from(new Set(results.map((r) => r.quizCode)))
 
-  // Get unique values for filters
-  const uniqueSections = [...new Set(results.map((result) => result.section))].filter(Boolean).sort()
-  const uniqueDepartments = [...new Set(results.map((result) => result.department))].filter(Boolean)
-  const uniqueQuizzes = [...new Set(results.map((result) => result.quizCode))].filter(Boolean)
-
-  const handleBackToDashboard = () => {
-    router.push("/faculty/dashboard")
-  }
-
-  const handleExportResults = () => {
-    const csvContent = [
-      [
-        "Student Name",
-        "Email",
-        "Section",
-        "Department",
-        "Quiz Code",
-        "Quiz Title",
-        "Score",
-        "Correct Answers",
-        "Total Questions",
-        "Time Spent",
-        "Submitted At",
-      ],
-      ...filteredResults.map((result) => [
-        result.studentName,
-        result.studentEmail,
-        result.section,
-        result.department,
-        result.quizCode,
-        result.quizTitle,
-        result.score,
-        result.correctAnswers,
-        result.totalQuestions,
-        Math.floor(result.timeSpent / 60) + "m " + (result.timeSpent % 60) + "s",
-        new Date(result.submittedAt).toLocaleString(),
-      ]),
-    ]
-      .map((row) => row.join(","))
-      .join("\n")
-
-    const blob = new Blob([csvContent], { type: "text/csv" })
-    const url = window.URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `quiz_results_${new Date().toISOString().split("T")[0]}.csv`
-    a.click()
-    window.URL.revokeObjectURL(url)
-  }
-
-  if (isLoading) {
+  if (isLoading || authLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
           <p className="text-gray-600">Loading results...</p>
         </div>
       </div>
     )
   }
 
-  if (!user) {
+  if (!user || user.userType !== "faculty") {
     return null
   }
 
@@ -207,49 +138,39 @@ export default function FacultyResultsPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
-              <Button variant="ghost" onClick={handleBackToDashboard} className="mr-4">
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Back to Dashboard
+              <Button variant="ghost" onClick={() => router.push("/faculty/dashboard")}>
+                ← Back to Dashboard
               </Button>
-              <div className="flex items-center">
-                <BookOpen className="h-8 w-8 text-purple-600" />
-                <span className="ml-2 text-xl font-bold text-gray-900">QuizMaster</span>
+              <div className="ml-4">
+                <h1 className="text-xl font-bold text-gray-900">Quiz Results</h1>
+                <p className="text-sm text-gray-600">View and analyze student performance</p>
               </div>
-              <Badge variant="secondary" className="ml-4 bg-purple-100 text-purple-800">
-                Results & Analytics
-              </Badge>
             </div>
 
-            <div className="flex items-center space-x-3">
-              <Avatar className="h-8 w-8">
-                <AvatarImage src={user?.picture || "/placeholder.png"} alt={user?.name} />
-                <AvatarFallback>{getUserInitials(user?.name)}</AvatarFallback>
-              </Avatar>
-              <div className="hidden sm:block">
-                <p className="text-sm font-medium text-gray-900">{user?.name}</p>
-                <p className="text-xs text-gray-500">Faculty</p>
-              </div>
+            <div className="flex items-center space-x-4">
+              <Button variant="outline" size="sm">
+                <Download className="h-4 w-4 mr-2" />
+                Export
+              </Button>
+              <Button variant="outline" size="sm">
+                <Filter className="h-4 w-4 mr-2" />
+                Filter
+              </Button>
             </div>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Quiz Results & Analytics</h1>
-          <p className="text-gray-600 mt-2">View and analyze student performance across all quizzes</p>
-        </div>
-
-        {/* Statistics Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <Card>
             <CardContent className="p-6">
               <div className="flex items-center">
                 <Users className="h-8 w-8 text-blue-600" />
                 <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Total Students</p>
-                  <p className="text-2xl font-bold text-gray-900">{stats.totalStudents}</p>
+                  <p className="text-sm font-medium text-gray-600">Total Submissions</p>
+                  <p className="text-2xl font-bold text-gray-900">{stats.totalSubmissions}</p>
                 </div>
               </div>
             </CardContent>
@@ -270,10 +191,10 @@ export default function FacultyResultsPage() {
           <Card>
             <CardContent className="p-6">
               <div className="flex items-center">
-                <Trophy className="h-8 w-8 text-yellow-600" />
+                <CheckCircle className="h-8 w-8 text-purple-600" />
                 <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Highest Score</p>
-                  <p className="text-2xl font-bold text-gray-900">{stats.highestScore}%</p>
+                  <p className="text-sm font-medium text-gray-600">Completion Rate</p>
+                  <p className="text-2xl font-bold text-gray-900">{stats.completionRate}%</p>
                 </div>
               </div>
             </CardContent>
@@ -282,108 +203,46 @@ export default function FacultyResultsPage() {
           <Card>
             <CardContent className="p-6">
               <div className="flex items-center">
-                <Target className="h-8 w-8 text-red-600" />
+                <TrendingUp className="h-8 w-8 text-orange-600" />
                 <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Lowest Score</p>
-                  <p className="text-2xl font-bold text-gray-900">{stats.lowestScore}%</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center">
-                <Award className="h-8 w-8 text-purple-600" />
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Pass Rate</p>
-                  <p className="text-2xl font-bold text-gray-900">{stats.passRate}%</p>
+                  <p className="text-sm font-medium text-gray-600">Top Score</p>
+                  <p className="text-2xl font-bold text-gray-900">{stats.topScore}%</p>
                 </div>
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Filters and Search */}
+        {/* Filters */}
         <Card className="mb-6">
           <CardHeader>
             <CardTitle className="flex items-center">
               <Filter className="mr-2 h-5 w-5" />
-              Filters & Search
+              Filter Results
             </CardTitle>
+            <CardDescription>Filter results by quiz or student criteria</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-              <div>
-                <label className="text-sm font-medium text-gray-700 mb-1 block">Search Student</label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                  <Input
-                    placeholder="Name or email..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-gray-700 mb-1 block">Section</label>
-                <Select value={selectedSection} onValueChange={setSelectedSection}>
+            <div className="flex items-center space-x-4">
+              <div className="flex-1">
+                <Select value={selectedQuiz} onValueChange={handleQuizFilter}>
                   <SelectTrigger>
-                    <SelectValue placeholder="All Sections" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Sections</SelectItem>
-                    {uniqueSections.map((section) => (
-                      <SelectItem key={section} value={section}>
-                        Section {section}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-gray-700 mb-1 block">Department</label>
-                <Select value={selectedDepartment} onValueChange={setSelectedDepartment}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="All Departments" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Departments</SelectItem>
-                    {uniqueDepartments.map((dept) => (
-                      <SelectItem key={dept} value={dept}>
-                        {dept}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-gray-700 mb-1 block">Quiz</label>
-                <Select value={selectedQuiz} onValueChange={setSelectedQuiz}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="All Quizzes" />
+                    <SelectValue placeholder="Select a quiz" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Quizzes</SelectItem>
-                    {uniqueQuizzes.map((quiz) => (
-                      <SelectItem key={quiz} value={quiz}>
-                        {quiz}
+                    {uniqueQuizzes.map((quizCode) => (
+                      <SelectItem key={quizCode} value={quizCode}>
+                        {quizCode}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-
-              <div className="flex items-end">
-                <Button onClick={handleExportResults} variant="outline" className="w-full bg-transparent">
-                  <Download className="mr-2 h-4 w-4" />
-                  Export CSV
-                </Button>
-              </div>
+              <Button variant="outline">
+                <Search className="h-4 w-4 mr-2" />
+                Search Students
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -391,18 +250,25 @@ export default function FacultyResultsPage() {
         {/* Results Table */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <div className="flex items-center">
-                <TrendingUp className="mr-2 h-5 w-5" />
-                Student Results ({filteredResults.length})
-              </div>
+            <CardTitle className="flex items-center">
+              <BookOpen className="mr-2 h-5 w-5" />
+              Quiz Results
+              {selectedQuiz !== "all" && (
+                <Badge variant="secondary" className="ml-2">
+                  {selectedQuiz}
+                </Badge>
+              )}
             </CardTitle>
+            <CardDescription>
+              Showing {filteredResults.length} result{filteredResults.length !== 1 ? "s" : ""}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {filteredResults.length === 0 ? (
-              <div className="text-center py-8">
-                <Trophy className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-500">No results found matching your criteria</p>
+              <div className="text-center py-12">
+                <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">No results found</h3>
+                <p className="text-gray-600">No quiz results match your current filters.</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -410,58 +276,68 @@ export default function FacultyResultsPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Student</TableHead>
-                      <TableHead>Section</TableHead>
-                      <TableHead>Department</TableHead>
                       <TableHead>Quiz</TableHead>
                       <TableHead>Score</TableHead>
-                      <TableHead>Correct/Total</TableHead>
                       <TableHead>Time Spent</TableHead>
+                      <TableHead>Status</TableHead>
                       <TableHead>Submitted</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredResults.map((result, index) => (
-                      <TableRow key={index}>
+                    {filteredResults.map((result) => (
+                      <TableRow key={result.id}>
                         <TableCell>
                           <div className="flex items-center space-x-3">
                             <Avatar className="h-8 w-8">
-                              <AvatarFallback>{getUserInitials(result.studentName)}</AvatarFallback>
+                              <AvatarImage src="/placeholder.png" alt={result.studentName} />
+                              <AvatarFallback>
+                                {result.studentName
+                                  .split(" ")
+                                  .map((n) => n[0])
+                                  .join("")}
+                              </AvatarFallback>
                             </Avatar>
                             <div>
                               <p className="font-medium text-gray-900">{result.studentName}</p>
-                              <p className="text-sm text-gray-500">{result.studentEmail}</p>
+                              <p className="text-sm text-gray-600">{result.studentEmail}</p>
                             </div>
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Badge variant="outline">Section {result.section}</Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline">{result.department}</Badge>
-                        </TableCell>
-                        <TableCell>
                           <div>
-                            <p className="font-medium">{result.quizCode}</p>
-                            <p className="text-sm text-gray-500">{result.quizTitle}</p>
+                            <p className="font-medium text-gray-900">{result.quizTitle}</p>
+                            <p className="text-sm text-gray-600">{result.quizCode}</p>
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Badge className={getScoreBadgeColor(result.score)}>{result.score}%</Badge>
+                          <Badge variant={getScoreBadgeVariant(result.score)}>{result.score}%</Badge>
                         </TableCell>
                         <TableCell>
-                          <span className="text-sm">
-                            {result.correctAnswers}/{result.totalQuestions}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-sm">
+                          <div className="flex items-center">
+                            <Clock className="h-4 w-4 text-gray-400 mr-1" />
                             {Math.floor(result.timeSpent / 60)}m {result.timeSpent % 60}s
-                          </span>
+                          </div>
                         </TableCell>
                         <TableCell>
-                          <span className="text-sm text-gray-500">
-                            {new Date(result.submittedAt).toLocaleDateString()}
-                          </span>
+                          <Badge
+                            variant={
+                              result.status === "completed"
+                                ? "default"
+                                : result.status === "in-progress"
+                                  ? "secondary"
+                                  : "outline"
+                            }
+                          >
+                            {result.status === "completed"
+                              ? "Completed"
+                              : result.status === "in-progress"
+                                ? "In Progress"
+                                : "Not Started"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <p className="text-sm text-gray-900">{new Date(result.submittedAt).toLocaleDateString()}</p>
+                          <p className="text-xs text-gray-600">{new Date(result.submittedAt).toLocaleTimeString()}</p>
                         </TableCell>
                       </TableRow>
                     ))}

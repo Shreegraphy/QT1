@@ -1,115 +1,144 @@
 export interface User {
   id: string
-  email: string
   name: string
-  picture: string
+  email: string
   userType: "student" | "faculty"
-  loginMethod: string
-  signupTime: string
-  section?: string
-  department?: string
-  password?: string // For manual accounts
+  picture?: string
+  createdAt: Date
+  lastLogin: Date
 }
 
-export interface StoredUser {
-  id: string
-  email: string
-  name: string
-  picture: string
-  userType: "student" | "faculty"
-  loginMethod: string
-  signupTime: string
-  section?: string
-  department?: string
-  passwordHash?: string // Hashed password for security
-}
+class UserManager {
+  private users: Map<string, User> = new Map()
+  private emailIndex: Map<string, string> = new Map()
 
-// Simple hash function for demo purposes (in production, use bcrypt)
-const simpleHash = (password: string): string => {
-  let hash = 0
-  for (let i = 0; i < password.length; i++) {
-    const char = password.charCodeAt(i)
-    hash = (hash << 5) - hash + char
-    hash = hash & hash // Convert to 32-bit integer
+  constructor() {
+    this.loadFromStorage()
   }
-  return hash.toString()
-}
 
-export const userManager = {
-  // Get all registered users
-  getAllUsers: (): StoredUser[] => {
-    return JSON.parse(localStorage.getItem("registered_users") || "[]")
-  },
+  private loadFromStorage() {
+    if (typeof window === "undefined") return
 
-  // Check if user exists by email
-  userExists: (email: string): boolean => {
-    const users = userManager.getAllUsers()
-    return users.some((user) => user.email.toLowerCase() === email.toLowerCase())
-  },
-
-  // Register a new user
-  registerUser: (userData: User): boolean => {
-    const users = userManager.getAllUsers()
-
-    // Check if user already exists
-    if (userManager.userExists(userData.email)) {
-      return false
-    }
-
-    const storedUser: StoredUser = {
-      ...userData,
-      passwordHash: userData.password ? simpleHash(userData.password) : undefined,
-    }
-
-    // Remove password from stored data
-    delete (storedUser as any).password
-
-    users.push(storedUser)
-    localStorage.setItem("registered_users", JSON.stringify(users))
-    return true
-  },
-
-  // Authenticate user
-  authenticateUser: (email: string, password?: string, loginMethod = "manual"): StoredUser | null => {
-    const users = userManager.getAllUsers()
-    const user = users.find((u) => u.email.toLowerCase() === email.toLowerCase())
-
-    if (!user) {
-      return null
-    }
-
-    // For manual login, check password
-    if (loginMethod === "manual" && password) {
-      if (!user.passwordHash || user.passwordHash !== simpleHash(password)) {
-        return null
+    try {
+      const stored = localStorage.getItem("quiz_app_users")
+      if (stored) {
+        const data = JSON.parse(stored)
+        this.users = new Map(data.users || [])
+        this.emailIndex = new Map(data.emailIndex || [])
       }
+    } catch (error) {
+      console.error("Error loading users from storage:", error)
+    }
+  }
+
+  private saveToStorage() {
+    if (typeof window === "undefined") return
+
+    try {
+      const data = {
+        users: Array.from(this.users.entries()),
+        emailIndex: Array.from(this.emailIndex.entries()),
+      }
+      localStorage.setItem("quiz_app_users", JSON.stringify(data))
+    } catch (error) {
+      console.error("Error saving users to storage:", error)
+    }
+  }
+
+  createUser(id: string, name: string, email: string, userType: "student" | "faculty"): User {
+    const user: User = {
+      id,
+      name,
+      email,
+      userType,
+      createdAt: new Date(),
+      lastLogin: new Date(),
     }
 
-    // For OAuth logins, just check if user exists and login method matches
-    if (loginMethod !== "manual" && user.loginMethod !== loginMethod) {
-      return null
-    }
+    this.users.set(id, user)
+    this.emailIndex.set(email.toLowerCase(), id)
+    this.saveToStorage()
 
     return user
-  },
+  }
 
-  // Get user by ID
-  getUserById: (id: string): StoredUser | null => {
-    const users = userManager.getAllUsers()
-    return users.find((user) => user.id === id) || null
-  },
+  getUserById(id: string): User | undefined {
+    return this.users.get(id)
+  }
 
-  // Update user data
-  updateUser: (userId: string, updates: Partial<StoredUser>): boolean => {
-    const users = userManager.getAllUsers()
-    const userIndex = users.findIndex((user) => user.id === userId)
+  getUserByEmail(email: string): User | undefined {
+    const userId = this.emailIndex.get(email.toLowerCase())
+    return userId ? this.users.get(userId) : undefined
+  }
 
-    if (userIndex === -1) {
-      return false
+  updateUser(id: string, updates: Partial<User>): User | undefined {
+    const user = this.users.get(id)
+    if (!user) return undefined
+
+    const updatedUser = { ...user, ...updates }
+    this.users.set(id, updatedUser)
+
+    // Update email index if email changed
+    if (updates.email && updates.email !== user.email) {
+      this.emailIndex.delete(user.email.toLowerCase())
+      this.emailIndex.set(updates.email.toLowerCase(), id)
     }
 
-    users[userIndex] = { ...users[userIndex], ...updates }
-    localStorage.setItem("registered_users", JSON.stringify(users))
+    this.saveToStorage()
+    return updatedUser
+  }
+
+  deleteUser(id: string): boolean {
+    const user = this.users.get(id)
+    if (!user) return false
+
+    this.users.delete(id)
+    this.emailIndex.delete(user.email.toLowerCase())
+    this.saveToStorage()
     return true
-  },
+  }
+
+  getAllUsers(): User[] {
+    return Array.from(this.users.values())
+  }
+
+  getUsersByType(userType: "student" | "faculty"): User[] {
+    return this.getAllUsers().filter((user) => user.userType === userType)
+  }
+
+  updateLastLogin(id: string): void {
+    const user = this.users.get(id)
+    if (user) {
+      user.lastLogin = new Date()
+      this.users.set(id, user)
+      this.saveToStorage()
+    }
+  }
 }
+
+// Create singleton instance
+const userManager = new UserManager()
+
+// Export convenience functions
+export const createUser = (id: string, name: string, email: string, userType: "student" | "faculty") =>
+  userManager.createUser(id, name, email, userType)
+
+export const getUserById = (id: string) => userManager.getUserById(id)
+
+export const getUserByEmail = (email: string) => userManager.getUserByEmail(email)
+
+export const updateUser = (id: string, updates: Partial<User>) => userManager.updateUser(id, updates)
+
+export const deleteUser = (id: string) => userManager.deleteUser(id)
+
+export const getAllUsers = () => userManager.getAllUsers()
+
+export const getUsersByType = (userType: "student" | "faculty") => userManager.getUsersByType(userType)
+
+export const updateLastLogin = (id: string) => userManager.updateLastLogin(id)
+
+export const saveUser = (user: User) => {
+  userManager.updateUser(user.id, user)
+}
+
+export default userManager
