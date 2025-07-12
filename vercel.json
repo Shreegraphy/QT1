@@ -1,0 +1,5 @@
+{
+  // Tell Vercel which command to run when installing
+  // The --no-frozen-lockfile flag lets pnpm refresh the lock automatically
+  "installCommand": "pnpm install --no-frozen-lockfile"
+}
